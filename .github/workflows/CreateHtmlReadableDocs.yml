@@ -1,0 +1,94 @@
+name: Create release documentation
+
+on:
+  push:
+    branches: [ labdocs ]
+
+env: 
+  STORAGE_FOLDER: AZ-204-developing-solutions-for-microsoft-azure
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: 'Get Node'
+        uses: actions/setup-node@v1
+        with:
+          node-version: 12.x
+
+      #Lint the markdown files
+      - name: 'Linting Lab Content markdown files'
+        uses: nosborn/github-action-markdown-cli@v1.1.1
+        with:
+          config_file: .markdownlint.json
+          files:  ./instructions
+
+      #Lint any json files
+      #- name: 'Install JSONLint'
+      #  run: npm install jsonlint -g
+
+      #- name: 'Execute json linter on repository'
+      #  run: |
+      #    jsonlint ./Instructions/**/*
+      #    jsonlint ./Allfiles/**/*
+
+      # Install PanDoc
+      - name: Install Pandoc
+        run: sudo apt-get install pandoc
+
+      # Setup the output archive environment
+      - name: 'Setup output directory/directories'
+        run: |
+          mkdir output 
+          sudo chmod -R 755 output
+          mkdir output/Instructions
+          sudo chmod -R 755 output/Instructions
+          mkdir output/Instructions/Labs
+          sudo chmod -R 755 output/Instructions/Labs
+          
+      # Create HTML files
+      - name: 'Create Lab HTML files'
+        run: |
+          FILE_LIST_MD=$(printf '%s;' ./Instructions/Labs/*.md)
+          #echo ${FILE_LIST_MD}
+          IFS=';' read -ra MDFILES <<< ${FILE_LIST_MD}
+          for f in ${MDFILES[@]}; 
+          do 
+            HTML_FULL_PATH=`basename ${f}`
+            NEW_FILE=${HTML_FULL_PATH/md/html}
+            pandoc --from markdown+raw_html --output=output/Instructions/Labs/${NEW_FILE} ${f}
+            cp ${f} output/Instructions/Labs/
+          done
+      
+      #Copy any other files you want in the output here
+
+      #Deploy to storage account here
+      #NOTE: You  must add the secrets to the repo
+      #      secrets.STORAGE_ACCOUNT_NAME => Your storage account name, stored in repo secrets
+      #      secrets.STORAGE_ACCOUNT_CONTAINER => Your output container (eliminate this to use AZ-204-... env folder as container), stored in repo secrets
+      #      env.STORAGE_FOLDER => Folder to route output to in storage container [or storage container root] Defined at the top of this file
+      #      secrets.STORAGE_ACCOUNT_SAS_TOKEN => Your Create/Add/Write SAS Token for your storage account container, stored in secrets [don't store the `?` it's in the path]
+      - name: 'Deploy output to storage'
+        run: |
+          DESTINATION="https://${{ secrets.STORAGE_ACCOUNT_NAME }}.blob.core.windows.net/${{ secrets.STORAGE_ACCOUNT_CONTAINER }}/${{ env.STORAGE_FOLDER }}?${{ secrets.STORAGE_ACCOUNT_SAS_TOKEN }}"
+
+          #Download and install azcopy 
+          wget -O azcopy.tar.gz https://aka.ms/downloadazcopy-v10-linux
+          tar -xf azcopy.tar.gz
+          rm azcopy.tar.gz
+
+          echo "Copying content to Azure blob storage lab folder"
+            
+          azcopy copy 'output/Instructions/Labs/*' $DESTINATION --recursive 
+          
+          echo "Content copied to folder"
+          echo $DESTINATION      
+
+      #Delete Archive to cleanup github repo output
+      #- name: Delete Output
+      #  uses: geekyeggo/delete-artifact@v1
+      #  with:
+      #    name: output
